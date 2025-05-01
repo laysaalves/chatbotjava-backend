@@ -56,8 +56,7 @@ public class ChatbotService {
     """.formatted(lojaInfo));
 
 
-        List<String> contexto = request.context() != null ? request.context() : new ArrayList<>();
-        for (String pastMessage : contexto) {
+        for (String pastMessage : request.context()) {
             contentBuilder.append("\nHistórico:\n").append(pastMessage);
         }
 
