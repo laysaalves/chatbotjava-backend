@@ -4,11 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.layseiras.chatbotjava.config.GeminiApi;
 import dev.layseiras.chatbotjava.dtos.ChatbotRequest;
-import dev.layseiras.chatbotjava.dtos.ChatbotResponse;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class ChatbotService {
@@ -17,6 +23,7 @@ public class ChatbotService {
     private final String API_KEY;
 
     private WebClient webClient;
+    private String lojaInfo;
 
     @Autowired
     public ChatbotService(GeminiApi gemini) {
@@ -29,21 +36,48 @@ public class ChatbotService {
                 .build();
     }
 
+    @PostConstruct
+    public void init() {
+        try {
+            lojaInfo = Files.readString(Path.of("src/main/resources/loja-info.txt"));
+        } catch (IOException e) {
+            lojaInfo = "Informações da loja indisponíveis no momento.";
+        }
+    }
+
+
     public String processUserInput(ChatbotRequest request) {
+        StringBuilder contentBuilder = new StringBuilder();
+
+        contentBuilder.append("""
+    Você é um agente virtual da loja Layseiras Shop, especializada em produtos de tecnologia e periféricos gamer. Sua função é atender os clientes com simpatia, clareza e objetividade, utilizando as informações da loja a seguir. Responda perguntas sobre produtos, prazos, políticas de frete e formas de pagamento com base nesses dados. Se não souber algo, oriente o cliente a entrar em contato pelo e-mail oficial ou WhatsApp da loja.
+                                                                                                                                                                     :
+    %s
+    """.formatted(lojaInfo));
+
+
+        List<String> contexto = request.context() != null ? request.context() : new ArrayList<>();
+        for (String pastMessage : contexto) {
+            contentBuilder.append("\nHistórico:\n").append(pastMessage);
+        }
+
+        contentBuilder.append("\nCliente: ").append(request.userInput());
+
         return """
-                {
-                  "contents": [
-                        {
-                        "parts": [
-                        {
-                            "text": "Você é um agente de suporte da loja canjiquinha e ela é do ramo de tecnologia, vendendo periféricos etc. Sua função é ajudar a sanar os questionamentos dos clientes. Questionamento: %s"
-                        }
-                      ]
+            {
+              "contents": [
+                    {
+                    "parts": [
+                    {
+                        "text": "%s"
                     }
                   ]
                 }
-                """.formatted(request.userInput());
+              ]
+            }
+            """.formatted(contentBuilder.toString());
     }
+
 
     public Mono<String> getChatbotOutput(ChatbotRequest request) {
         String requestBody = processUserInput(request);
