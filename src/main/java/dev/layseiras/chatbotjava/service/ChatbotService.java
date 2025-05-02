@@ -4,17 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.layseiras.chatbotjava.config.GeminiApi;
 import dev.layseiras.chatbotjava.dtos.ChatbotRequest;
-import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 
 @Service
 public class ChatbotService {
@@ -23,28 +16,20 @@ public class ChatbotService {
     private final String API_KEY;
 
     private WebClient webClient;
-    private String lojaInfo;
+
+    private final ReadFileService fileService;
 
     @Autowired
-    public ChatbotService(GeminiApi gemini) {
+    public ChatbotService(GeminiApi gemini, ReadFileService fileService) {
         this.API_KEY = gemini.getApiKey();
         this.API_URL = gemini.getApiUrl() + API_KEY;
+        this.fileService = fileService;
 
         this.webClient = WebClient.builder()
                 .baseUrl(API_URL)
                 .defaultHeader("content-type", "application/json")
                 .build();
     }
-
-    @PostConstruct
-    public void init() {
-        try {
-            lojaInfo = Files.readString(Path.of("src/main/resources/loja-info.txt"));
-        } catch (IOException e) {
-            lojaInfo = "Informações da loja indisponíveis no momento.";
-        }
-    }
-
 
     public String processUserInput(ChatbotRequest request) {
         StringBuilder contentBuilder = new StringBuilder();
@@ -53,7 +38,7 @@ public class ChatbotService {
     Você é um agente virtual da loja Layseiras Shop, especializada em produtos de tecnologia e periféricos gamer. Sua função é atender os clientes com simpatia, clareza e objetividade, utilizando as informações da loja a seguir. Responda perguntas sobre produtos, prazos, políticas de frete e formas de pagamento com base nesses dados. Se não souber algo, oriente o cliente a entrar em contato pelo e-mail oficial ou WhatsApp da loja.
                                                                                                                                                                      :
     %s
-    """.formatted(lojaInfo));
+    """.formatted(fileService.getTextFile()));
 
 
         for (String pastMessage : request.context()) {
