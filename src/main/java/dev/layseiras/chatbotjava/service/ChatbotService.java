@@ -2,6 +2,8 @@ package dev.layseiras.chatbotjava.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.layseiras.chatbotjava.config.GeminiApi;
 import dev.layseiras.chatbotjava.dtos.ChatbotRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,57 +11,83 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Service
 public class ChatbotService {
 
-    private final String API_URL;
-    private final String API_KEY;
+    private final String apiUrl;
+    private final String apiKey;
 
-    private WebClient webClient;
+    private final WebClient webClient;
 
     private final ReadFileService fileService;
 
     @Autowired
     public ChatbotService(GeminiApi gemini, ReadFileService fileService) {
-        this.API_KEY = gemini.getApiKey();
-        this.API_URL = gemini.getApiUrl() + API_KEY;
+        this.apiKey = gemini.getApiKey();
+        this.apiUrl = gemini.getApiUrl() + apiKey;
         this.fileService = fileService;
 
         this.webClient = WebClient.builder()
-                .baseUrl(API_URL)
+                .baseUrl(apiUrl)
                 .defaultHeader("content-type", "application/json")
                 .build();
     }
 
     public String processUserInput(ChatbotRequest request) {
-        StringBuilder contentBuilder = new StringBuilder();
+        String systemPrompt = buildSystemPrompt();
+        String contextHistory = buildContextHistory(request.context());
+        String userPrompt = "Cliente: " + request.userInput();
 
-        contentBuilder.append("""
-    Você é um agente virtual da loja Layseiras Shop, especializada em produtos de tecnologia e periféricos gamer. Sua função é atender os clientes com simpatia, clareza e objetividade, utilizando as informações da loja a seguir. Responda perguntas sobre produtos, prazos, políticas de frete e formas de pagamento com base nesses dados. Se não souber algo, oriente o cliente a entrar em contato pelo e-mail oficial ou WhatsApp da loja.
-                                                                                                                                                                     :
-    %s
-    """.formatted(fileService.getTextFile()));
+        String fullPrompt = String.join("\n", systemPrompt, contextHistory, userPrompt);
 
+        return wrapInJson(fullPrompt);
+    }
 
-        for (String pastMessage : request.context()) {
-            contentBuilder.append("\nHistórico:\n").append(pastMessage);
+        private static final String SYSTEM_INSTRUCTIONS = """
+        Você é um agente virtual da loja Layseiras Shop. 
+        Sua função é atender os clientes com simpatia, clareza e objetividade, utilizando as informações da loja a seguir. 
+        Responda perguntas sobre produtos, prazos, políticas de frete e formas de pagamento com base nesses dados. 
+        Se não souber algo, oriente o cliente a entrar em contato pelo e-mail oficial ou WhatsApp da loja.
+        
+        %s
+        """;
+
+        private String buildSystemPrompt() {
+            String storeData = fileService.getTextFile();
+            return SYSTEM_INSTRUCTIONS.formatted(storeData);
         }
 
-        contentBuilder.append("\nCliente: ").append(request.userInput());
 
-        return """
-            {
-              "contents": [
-                    {
-                    "parts": [
-                    {
-                        "text": "%s"
-                    }
-                  ]
-                }
-              ]
-            }
-            """.formatted(contentBuilder.toString());
+    private String buildContextHistory(List<String> contextMessages) {
+        if (contextMessages == null || contextMessages.isEmpty()) return "";
+
+        return contextMessages.stream()
+                .map(msg -> "Histórico:\n" + msg)
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String wrapInJson(String prompt) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+
+            ObjectNode part = mapper.createObjectNode();
+            part.put("text", prompt);
+
+            ArrayNode parts = mapper.createArrayNode().add(part);
+            ObjectNode content = mapper.createObjectNode();
+            content.set("parts", parts);
+
+            ArrayNode contents = mapper.createArrayNode().add(content);
+            ObjectNode root = mapper.createObjectNode();
+            root.set("contents", contents);
+
+            return mapper.writeValueAsString(root);
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao montar JSON do input", e);
+        }
     }
 
 
@@ -76,7 +104,7 @@ public class ChatbotService {
                         JsonNode jsonNode = mapper.readTree(response);
                         JsonNode candidates = jsonNode.path("candidates");
 
-                        if (candidates.isArray() && candidates.size() > 0) {
+                        if (candidates.isArray() && !candidates.isEmpty()) {
                             JsonNode content = candidates.get(0).path("content");
                             if (content.has("parts")) {
                                 return content.get("parts").get(0).path("text").asText();
